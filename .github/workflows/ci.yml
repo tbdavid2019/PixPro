@@ -33,9 +33,15 @@ jobs:
         with:
           node-version: 20
 
+      - name: Install Google Magika CLI
+        run: |
+          curl -LsSf https://github.com/google/magika/releases/download/cli/v1.0.2/magika-installer.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
       - name: Run Test Suites & Security Regressions
         run: |
           echo "🧪 Running unit, contract, and security audit test suites..."
+          node tests/asset_detector_test.mjs
           node tests/security_audit_test.mjs
           node tests/cdn_delivery_test.mjs
           node tests/document_preview_test.mjs

@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2026.9.4] - 2026-09-08
+
+### 🧠 Google Magika AI File Content-Type Detection & Zero-Trust Defense
+- **Embedded Google Magika Model in Docker**:
+  - Integrated `magika-cli` (v1.0.2 standalone binary) into `Dockerfile`, packaging Google's deep learning model directly into the container image.
+  - Zero network dependency at runtime: 100% offline inference on local CPU taking ~5-15ms per file across `linux/amd64` and `linux/arm64`.
+- **Zero-Trust Upload Gateway (`config/detector.php`)**:
+  - Added `AssetDetector` helper combining Google Magika AI classification (`output.label`, `output.group`, `score`) with native PHP `fileinfo` fallback.
+  - **Eliminated Extension Trust**: Discontinued trusting user-supplied file extensions (`$_FILES['name']`). File routing and format validation are now guided by actual file content.
+  - **Dangerous Code & Web Shell Interception**: Proactively blocks executables and scripts (`php`, `shell`, `bash`, `elf`, `pebin`, `wasm`, `python`, etc.) across `api.php`, `config/upload.php`, `api_file.php`, `config/video_logic.php`, `config/audio_logic.php`, and `mcp.php`, even when disguised with image extensions (e.g. `avatar.jpg`).
+  - **Empty File Protection**: Intercepts empty files (`output.label === 'empty'` or 0 bytes) early at the gateway.
+  - **Defense in Depth**: Retains `getimagesize()`/`imagecreatefromstring()` image decoding and `ffprobe` video/audio integrity checks after Magika validation.
+- **Automated Test Suite**:
+  - Added `tests/asset_detector_test.mjs` verifying contract methods, dangerous labels blacklist, genuine PNG detection, and disguised WebShell detection. Integrated into `.github/workflows/ci.yml`.
+
 ## [2026.9.3] - 2026-09-03
 
 ### 🐳 CI/CD & Multi-Arch Docker Publishing

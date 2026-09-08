@@ -4,6 +4,7 @@ session_start();
 require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/database.php';
 require_once __DIR__ . '/storage.php';
+require_once __DIR__ . '/detector.php';
 
 use OSS\OssClient;
 use OSS\Core\OssException;
@@ -341,12 +342,18 @@ function getImageDimensions($finalFilePath, $fileMimeType) {
 // ============================================
 
 /**
- * 检测并修正文件MIME类型
+ * 检测并修正文件MIME类型 (結合 Magika AI 與本地檔案內容辨識)
  */
 function detectMimeType($file) {
-    $extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    if (isset($file['tmp_name']) && file_exists($file['tmp_name'])) {
+        $detection = AssetDetector::detect($file['tmp_name'], $file['name'] ?? '');
+        $ext = $detection['ext'] ?: strtolower(pathinfo($file['name'] ?? '', PATHINFO_EXTENSION));
+        return [$detection['mime'], $ext, $detection];
+    }
+
+    $extension = strtolower(pathinfo($file['name'] ?? '', PATHINFO_EXTENSION));
     
-    // 根据扩展名判断MIME类型
+    // 根据扩展名判断MIME类型（回退備用）
     $mimeTypes = [
         'jpg' => 'image/jpeg',
         'jpeg' => 'image/jpeg',
@@ -369,7 +376,7 @@ function detectMimeType($file) {
     
     $mimeType = $mimeTypes[$extension] ?? 'application/octet-stream';
     
-    return [$mimeType, $extension];
+    return [$mimeType, $extension, []];
 }
 
 /**
@@ -377,8 +384,26 @@ function detectMimeType($file) {
  */
 function validateFile($file) {
     $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'application/octet-stream'];
-    list($mimeType, $extension) = detectMimeType($file);
+    list($mimeType, $extension, $detection) = detectMimeType($file);
     
+    // 1. 安全防護：阻擋可執行檔或腳本 (PHP, Shell, ELF, PEbin 等)
+    if (!empty($detection) && AssetDetector::isDangerous($detection)) {
+        respondAndExit(['result' => 'error', 'code' => 403, 'message' => '安全防護：禁止上傳可執行檔或腳本程式 (' . htmlspecialchars($detection['label'] ?? 'unknown') . ')']);
+    }
+
+    // 2. 空檔案阻擋
+    if (!empty($detection) && ($detection['label'] ?? '') === 'empty') {
+        respondAndExit(['result' => 'error', 'code' => 400, 'message' => '上傳的檔案為空檔案']);
+    }
+
+    // 3. 若為 Magika 檢測，驗證是否為圖片群組或合法圖片 label
+    if (!empty($detection) && ($detection['engine'] ?? '') === 'magika') {
+        $allowedImageLabels = ['jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'bmp', 'tiff', 'avif', 'heic'];
+        if (($detection['group'] ?? '') !== 'image' && !in_array($detection['label'] ?? '', $allowedImageLabels, true)) {
+            respondAndExit(['result' => 'error', 'code' => 406, 'message' => '檔案內容不是有效的圖片格式 (' . htmlspecialchars($detection['label'] ?? 'unknown') . ')']);
+        }
+    }
+
     if (!in_array($mimeType, $allowedTypes)) {
         respondAndExit(['result' => 'error', 'code' => 406, 'message' => '不支持的文件类型']);
     }

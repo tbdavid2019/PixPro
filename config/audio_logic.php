@@ -17,7 +17,13 @@ function handleAudioUpload($file, $pdo, $title = '', $description = '', $passwor
     }
     
     // 1. Validate file
-    list($mimeType, $extension) = detectMimeType($file);
+    list($mimeType, $extension, $detection) = detectMimeType($file);
+    if (!empty($detection) && AssetDetector::isDangerous($detection)) {
+        respondAndExit(['result' => 'error', 'code' => 403, 'message' => '安全防護：禁止上傳可執行檔或腳本程式 (' . htmlspecialchars($detection['label'] ?? 'unknown') . ')']);
+    }
+    if (!empty($detection) && ($detection['label'] ?? '') === 'empty') {
+        respondAndExit(['result' => 'error', 'code' => 400, 'message' => '上傳的檔案為空檔案']);
+    }
     $allowedAudioTypes = ['audio/mpeg', 'audio/wav', 'audio/aac', 'audio/ogg', 'audio/mp4', 'audio/flac', 'audio/x-wav', 'audio/x-mpeg'];
     
     if (!in_array($mimeType, $allowedAudioTypes) && strpos($mimeType, 'audio/') !== 0) {

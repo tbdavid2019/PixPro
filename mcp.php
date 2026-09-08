@@ -279,7 +279,10 @@ function executeUploadFromUrl($pdo, $config, $url, $title = '', $description = '
         'size' => $fileSize
     ];
 
-    list($mimeType, $ext) = detectMimeType($fakeFile);
+    list($mimeType, $ext, $detection) = detectMimeType($fakeFile);
+    if (!empty($detection) && AssetDetector::isDangerous($detection)) {
+        throw new Exception('安全防護：禁止上傳可執行檔或腳本程式 (' . ($detection['label'] ?? 'unknown') . ')');
+    }
     if (!$rawExt && $ext) {
         $renamedTemp = $tempFile . '.' . $ext;
         if (rename($tempFile, $renamedTemp)) {

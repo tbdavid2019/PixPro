@@ -361,12 +361,24 @@ function handleUploadFromUrl($pdo, $config) {
         'is_remote' => true // 標記為遠端抓取，方便內部處理
     ];
 
-    // 這裡我們需要修改 handleUploadedFile 以支援非 move_uploaded_file 的情況 (因為我們已經是本地暫存檔了)
-    // 為了簡單起見，我們直接在這裡手動處理或調用對應處理器
+    require_once __DIR__ . '/config/detector.php';
+    $detection = AssetDetector::detect($tempFile, $file['name']);
+
+    if (AssetDetector::isDangerous($detection)) {
+        @unlink($tempFile);
+        respondAndExit([
+            'result' => 'error',
+            'code' => 403,
+            'message' => '安全防護：遠端資源包含禁止的程式碼或可執行檔 (' . htmlspecialchars($detection['label'] ?? 'unknown') . ')'
+        ]);
+    }
+
+    if (($detection['label'] ?? '') === 'empty' || filesize($tempFile) === 0) {
+        @unlink($tempFile);
+        respondAndExit(['result' => 'error', 'code' => 400, 'message' => '遠端檔案為空檔案']);
+    }
+
     list($mimeType, $ext) = detectMimeType($file);
-    
-    // 注意：這裡必須把 move_uploaded_file 換成 rename，因為它是我們下載的檔案
-    // 我們稍微修改一下 handleUnifiedUpload 的邏輯，讓它支援本地路徑
     processAsset($file, $pdo, $config, $mimeType);
 }
 
@@ -375,18 +387,28 @@ function handleUploadFromUrl($pdo, $config) {
  */
 function processAsset($file, $pdo, $config, $mimeType) {
     // 針對 URL 下載的檔案，將其從臨時目錄「移動」到正式流程
-    // 我們可以透過一個特殊的 flag 讓 handleUploadedFile 知道不需要調用 move_uploaded_file
-    $_SESSION['use_rename'] = true; // 髒方法，但能最快兼容現有代碼
+    $_SESSION['use_rename'] = true;
     
     try {
-        if (strpos($mimeType, 'image/') === 0) {
+        require_once __DIR__ . '/config/detector.php';
+        $detection = AssetDetector::detect($file['tmp_name'], $file['name']);
+        if (AssetDetector::isDangerous($detection)) {
+            respondAndExit([
+                'result' => 'error',
+                'code' => 403,
+                'message' => '安全防護：禁止上傳可執行檔或腳本程式 (' . htmlspecialchars($detection['label'] ?? 'unknown') . ')'
+            ]);
+        }
+
+        $targetGroup = AssetDetector::routeAsset($detection);
+
+        if ($targetGroup === 'image') {
             handleUploadedFile($file, $_POST['token'] ?? '', $_SERVER['HTTP_REFERER'] ?? '', $_POST['password'] ?? '');
-        } elseif (strpos($mimeType, 'video/') === 0) {
+        } elseif ($targetGroup === 'video') {
             require_once 'config/video_logic.php';
-            // 修改 handleVideoUpload 以支援 rename
             $videoData = handleVideoUpload($file, $pdo, $_POST['title'] ?? '', $_POST['description'] ?? '', $_POST['password'] ?? '');
             respondAndExit(['result' => 'success', 'code' => 200, 'data' => $videoData]);
-        } elseif (strpos($mimeType, 'audio/') === 0) {
+        } elseif ($targetGroup === 'audio') {
             require_once 'config/audio_logic.php';
             $audioData = handleAudioUpload($file, $pdo, $_POST['title'] ?? '', $_POST['description'] ?? '', $_POST['password'] ?? '');
             respondAndExit(['result' => 'success', 'code' => 200, 'data' => $audioData]);
@@ -428,26 +450,48 @@ function handleUnifiedUpload($pdo, $config) {
         }
     }
 
-    // 根據檔案類型自動分流
+    // 根據檔案內容自動分流
+    require_once __DIR__ . '/config/detector.php';
     foreach ($_FILES as $file) {
-        list($mimeType, $extension) = detectMimeType($file);
+        $detection = AssetDetector::detect($file['tmp_name'], $file['name']);
+
+        // 1. 安全防護：阻擋可執行檔或腳本 (PHP, Shell, ELF, PEbin 等)
+        if (AssetDetector::isDangerous($detection)) {
+            respondAndExit([
+                'result' => 'error',
+                'code' => 403,
+                'message' => '安全防護：禁止上傳可執行檔或腳本程式 (' . htmlspecialchars($detection['label'] ?? 'unknown') . ')'
+            ]);
+        }
+
+        // 2. 空檔案阻擋
+        if (($detection['label'] ?? '') === 'empty' || ($file['size'] ?? 0) === 0) {
+            respondAndExit([
+                'result' => 'error',
+                'code' => 400,
+                'message' => '上傳的檔案為空檔案'
+            ]);
+        }
+
+        // 3. 依檢測結果路由分流
+        $targetGroup = AssetDetector::routeAsset($detection);
         
-        if (strpos($mimeType, 'image/') === 0) {
+        if ($targetGroup === 'image') {
             // 圖片處理
             handleUploadedFile($file, $_POST['token'] ?? '', $_SERVER['HTTP_REFERER'] ?? '', $_POST['password'] ?? '');
-        } elseif (strpos($mimeType, 'video/') === 0) {
+        } elseif ($targetGroup === 'video') {
             // 影片處理
             require_once 'config/video_logic.php';
             $videoData = handleVideoUpload($file, $pdo, $_POST['title'] ?? '', $_POST['description'] ?? '', $_POST['password'] ?? '');
             respondAndExit(['result' => 'success', 'code' => 200, 'data' => $videoData]);
-        } elseif (strpos($mimeType, 'audio/') === 0) {
+        } elseif ($targetGroup === 'audio') {
             // 音訊處理
             require_once 'config/audio_logic.php';
             $audioData = handleAudioUpload($file, $pdo, $_POST['title'] ?? '', $_POST['description'] ?? '', $_POST['password'] ?? '');
             respondAndExit(['result' => 'success', 'code' => 200, 'data' => $audioData]);
         } else {
             // 文件處理
-            require_once 'api_file.php'; // 暫時借用 api_file.php 的邏輯
+            require_once 'api_file.php';
             handleFileUpload($file, $pdo, $config);
         }
     }

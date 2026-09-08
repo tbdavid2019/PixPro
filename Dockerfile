@@ -14,7 +14,13 @@ RUN apt-get update && apt-get install -y \
     libsqlite3-dev \
     ffmpeg \
     python3-minimal \
+    curl \
+    xz-utils \
     && rm -rf /var/lib/apt/lists/*
+
+# 安装 Google Magika 独立二進制 (內建深度學習模型，支援 amd64/arm64 離線本地推論)
+RUN CARGO_HOME=/usr/local curl -LsSf https://github.com/google/magika/releases/download/cli/v1.0.2/magika-installer.sh | CARGO_HOME=/usr/local sh \
+    && magika --version
 
 # 安装 PHP 扩展
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \

@@ -92,7 +92,18 @@ function handleFileUpload($file, $pdo, $config) {
         $title = pathinfo($file['name'], PATHINFO_FILENAME);
     }
     
-    // 1. Validate file (strict document extension whitelist)
+    // 1. Validate file (content-type detection + strict document extension whitelist)
+    require_once __DIR__ . '/config/detector.php';
+    $detection = AssetDetector::detect($file['tmp_name'], $file['name']);
+
+    if (AssetDetector::isDangerous($detection)) {
+        respondAndExit(['result' => 'error', 'message' => '安全防護：禁止上傳可執行檔或腳本程式 (' . htmlspecialchars($detection['label'] ?? 'unknown', ENT_QUOTES, 'UTF-8') . ')']);
+    }
+
+    if (($detection['label'] ?? '') === 'empty' || ($file['size'] ?? 0) === 0) {
+        respondAndExit(['result' => 'error', 'message' => '上傳的檔案為空檔案']);
+    }
+
     $extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
     $allowedDocs = ['zip', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'vsd', 'vsdx', 'epub', 'txt', 'md', 'csv', 'json', 'yaml', 'yml', '7z', 'tar', 'gz', 'bz2'];
     $dangerousExtensions = ['php', 'phtml', 'php3', 'php4', 'php5', 'phar', 'inc', 'sh', 'bash', 'exe', 'bat', 'cmd', 'cgi', 'pl', 'py', 'js', 'html', 'htm', 'shtml', 'svg'];
@@ -115,10 +126,8 @@ function handleFileUpload($file, $pdo, $config) {
         respondAndExit(['result' => 'error', 'message' => '文件大小超過限制，最大允許 ' . formatSizeLimit($maxFileSize)]);
     }
     
-    // Get MIME type more accurately
-    $finfo = finfo_open(FILEINFO_MIME_TYPE);
-    $mimeType = finfo_file($finfo, $file['tmp_name']);
-    finfo_close($finfo);
+    // Get MIME type accurately from detector
+    $mimeType = $detection['mime'] ?: 'application/octet-stream';
     
     // 2. Prepare paths
     $dateFolder = date('Y/m/d');

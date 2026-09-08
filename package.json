@@ -1,6 +1,6 @@
 {
   "name": "888box",
-  "version": "2026.9.3",
+  "version": "2026.9.4",
   "description": "888box 是一款高效的媒體託管解決方案，集成了強大的圖片壓縮與影片處理功能。支援圖片、影片上傳與管理，並具備自動生成 Podcast RSS 饋送、影片封面提取與 MetaData 同步功能。後台採用瀑布流展示與 AJAX 刷新，有效降低存儲與頻寬成本。",
   "repository": {
     "type": "git",
